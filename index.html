@@ -469,6 +469,7 @@
                 <div class="question-number" id="questionNumber">Question 1 of 24</div>
                 <div class="question-text" id="questionText"></div>
                 <div class="options" id="optionsContainer"></div>
+                <button id="nextBtn" class="start-btn" style="display: none; margin-top: 20px;" onclick="handleNext()">다음 문항으로</button>
             </div>
         </div>
 
@@ -595,6 +596,7 @@
 
         let currentSelection = null;
         let questionDisplayTime = null;
+        let lastSelectionTime = null;
 
         // ========== 테스트 시작 ==========
         function startTest() {
@@ -623,11 +625,15 @@
             userData.questionStartTime = Date.now();
             questionDisplayTime = Date.now();
             currentSelection = null;
+            lastSelectionTime = null;
 
             // UI 업데이트
             document.getElementById('questionNumber').textContent = `Question ${index + 1} of ${questions.length}`;
             document.getElementById('questionText').textContent = question.text;
             document.getElementById('progressFill').style.width = `${((index + 1) / questions.length) * 100}%`;
+
+            // 다음 버튼 숨기기
+            document.getElementById('nextBtn').style.display = 'none';
 
             // 선택지 생성 (5점 척도)
             const optionsContainer = document.getElementById('optionsContainer');
@@ -655,7 +661,8 @@
 
         // ========== 옵션 선택 ==========
         function selectOption(element, value, question) {
-            const responseTime = Date.now() - questionDisplayTime;
+            lastSelectionTime = Date.now();
+            const responseTime = lastSelectionTime - questionDisplayTime;
             
             // 재선택 추적
             if (currentSelection !== null) {
@@ -671,27 +678,35 @@
             // 디버그 정보 업데이트
             updateDebugInfo(responseTime, userData.toggleCounts[question.id] || 0);
 
-            // 1초 후 다음 질문
-            setTimeout(() => {
-                const isAfk = responseTime > AFK_THRESHOLD;
-                if (isAfk) {
-                    userData.afkCount++;
-                }
+            // 다음 버튼 활성화
+            document.getElementById('nextBtn').style.display = 'block';
+        }
 
-                userData.answers.push({
-                    questionId: question.id,
-                    dimension: question.dimension,
-                    direction: question.direction,
-                    value: value,
-                    responseTime: responseTime,
-                    toggles: userData.toggleCounts[question.id] || 0,
-                    consistency: question.consistency,
-                    isAfk: isAfk
-                });
+        // ========== 다음 질문 이동 ==========
+        function handleNext() {
+            if (currentSelection === null) return;
 
-                userData.totalResponseTime += responseTime;
-                showQuestion(userData.currentQuestion + 1);
-            }, 1000);
+            const question = questions[userData.currentQuestion];
+            const responseTime = lastSelectionTime - questionDisplayTime;
+
+            const isAfk = responseTime > AFK_THRESHOLD;
+            if (isAfk) {
+                userData.afkCount++;
+            }
+
+            userData.answers.push({
+                questionId: question.id,
+                dimension: question.dimension,
+                direction: question.direction,
+                value: currentSelection,
+                responseTime: responseTime,
+                toggles: userData.toggleCounts[question.id] || 0,
+                consistency: question.consistency,
+                isAfk: isAfk
+            });
+
+            userData.totalResponseTime += responseTime;
+            showQuestion(userData.currentQuestion + 1);
         }
 
         // ========== 디버그 정보 ==========
