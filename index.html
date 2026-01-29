@@ -497,6 +497,22 @@
                 </div>
             </div>
 
+            <!-- 데이터 품질 분석 보고서 -->
+            <div class="insight-section" style="border-left-color: var(--warning); background: rgba(255, 165, 0, 0.05);">
+                <h4 style="color: var(--warning);">📊 응답 데이터 품질 분석</h4>
+                <ul style="list-style: none; margin-top: 15px;">
+                    <li style="margin-bottom: 10px; color: var(--text-dim);">
+                        <strong style="color: var(--text);">유효 응답률:</strong> <span id="validResponseRate">--</span>
+                    </li>
+                    <li style="margin-bottom: 10px; color: var(--text-dim);">
+                        <strong style="color: var(--text);">집중도 분석:</strong> <span id="afkAnalysis">--</span>
+                    </li>
+                    <li style="margin-bottom: 10px; color: var(--text-dim);">
+                        <strong style="color: var(--text);">신뢰도 코멘트:</strong> <span id="qualityComment">--</span>
+                    </li>
+                </ul>
+            </div>
+
             <div class="chart-container">
                 <h3 style="font-family: 'Cormorant Garamond', serif; font-size: 1.8rem; margin-bottom: 20px; color: var(--accent-soft);">
                     MBTI 지표별 확신도
@@ -566,6 +582,8 @@
             { id: 24, text: "규칙과 절차를 따르는 것이 효율적이다.", dimension: "JP", direction: "J" },
         ];
 
+        const AFK_THRESHOLD = 30000; // 30초
+
         const userData = {
             currentQuestion: 0,
             answers: [],
@@ -574,6 +592,7 @@
             toggleCounts: {},
             idleTimes: [],
             totalResponseTime: 0,
+            afkCount: 0,
         };
 
         let currentSelection = null;
@@ -656,6 +675,11 @@
 
             // 1초 후 다음 질문
             setTimeout(() => {
+                const isAfk = responseTime > AFK_THRESHOLD;
+                if (isAfk) {
+                    userData.afkCount++;
+                }
+
                 userData.answers.push({
                     questionId: question.id,
                     dimension: question.dimension,
@@ -663,7 +687,8 @@
                     value: value,
                     responseTime: responseTime,
                     toggles: userData.toggleCounts[question.id] || 0,
-                    consistency: question.consistency
+                    consistency: question.consistency,
+                    isAfk: isAfk
                 });
 
                 userData.totalResponseTime += responseTime;
@@ -695,9 +720,14 @@
 
                 // 가중치 부여: 반응 시간이 짧고 재선택이 없을수록 확신도 높음
                 let weight = 1.0;
-                if (ans.responseTime < 2000) weight += 0.3; // 빠른 응답
-                if (ans.toggles === 0) weight += 0.2; // 재선택 없음
-                if (ans.toggles > 2) weight -= 0.3; // 과도한 재선택
+
+                if (ans.isAfk) {
+                    // AFK인 경우 시간 가중치 제외 (기본 가중치 1.0 적용)
+                } else {
+                    if (ans.responseTime < 2000) weight += 0.3; // 빠른 응답
+                    if (ans.toggles === 0) weight += 0.2; // 재선택 없음
+                    if (ans.toggles > 2) weight -= 0.3; // 과도한 재선택
+                }
 
                 const adjustedValue = ans.value * weight;
 
@@ -740,6 +770,7 @@
             if (honestyScore < 60) confidence -= 10;
             if (avgResponseTime < 1500) confidence -= 5; // 너무 빠름
             if (totalToggles > 15) confidence -= 10; // 과도한 재선택
+            if (userData.afkCount > 0) confidence -= (userData.afkCount * 5); // AFK 감점
 
             // UI 업데이트
             document.getElementById('mbtiResult').textContent = mbti;
@@ -747,6 +778,27 @@
             document.getElementById('avgResponseTime').textContent = `${(avgResponseTime / 1000).toFixed(1)}s`;
             document.getElementById('totalToggles').textContent = totalToggles;
             document.getElementById('honestyScore').textContent = `${honestyScore}%`;
+
+            // 데이터 품질 분석 보고서 업데이트
+            const totalQuestions = userData.answers.length;
+            const validCount = totalQuestions - userData.afkCount;
+            const validRate = Math.round((validCount / totalQuestions) * 100);
+
+            document.getElementById('validResponseRate').textContent =
+                `${validRate}% (총 ${totalQuestions}문항 중 ${userData.afkCount}문항에서 비정상적 응답 흐름 감지)`;
+
+            document.getElementById('afkAnalysis').innerHTML =
+                `귀하는 검사 중 <strong>${userData.afkCount}회의 집중력 저하(AFK)</strong> 구간이 포착되었습니다. 이는 결과의 일관성에 영향을 줄 수 있는 요소입니다.`;
+
+            let qComment = "";
+            if (userData.afkCount === 0) {
+                qComment = "모든 문항에서 집중력을 유지하여 응답 흐름이 매우 원활합니다. 결과의 신뢰도가 높습니다.";
+            } else if (userData.afkCount <= 3) {
+                qComment = "일부 문항에서 응답 흐름이 끊겼으나, 전반적인 패턴이 일관되어 결과값은 유효한 것으로 판단됩니다.";
+            } else {
+                qComment = "잦은 집중력 저하로 인해 일부 결과의 정확도가 떨어질 수 있습니다. 재검사를 권장할 수 있는 수준입니다.";
+            }
+            document.getElementById('qualityComment').textContent = `"${qComment}"`;
 
             // 바 차트 생성
             createBarChart(scores);
