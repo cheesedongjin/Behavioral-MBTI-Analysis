@@ -594,9 +594,35 @@
             afkCount: 0,
         };
 
+        const mouseTracking = {
+            distance: 0,
+            lastX: null,
+            lastY: null
+        };
+
         let currentSelection = null;
         let questionDisplayTime = null;
         let lastSelectionTime = null;
+
+        // ========== 마우스 추적 리스너 ==========
+        document.addEventListener('mousemove', (e) => {
+            if (!document.querySelector('.question-screen.active')) return;
+
+            if (mouseTracking.lastX !== null && mouseTracking.lastY !== null) {
+                const dx = e.clientX - mouseTracking.lastX;
+                const dy = e.clientY - mouseTracking.lastY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                mouseTracking.distance += dist;
+
+                // 실시간 디버그 업데이트 (선택된 상태라면)
+                if (currentSelection !== null) {
+                    const qId = questions[userData.currentQuestion].id;
+                    updateDebugInfo(Date.now() - questionDisplayTime, userData.toggleCounts[qId] || 0);
+                }
+            }
+            mouseTracking.lastX = e.clientX;
+            mouseTracking.lastY = e.clientY;
+        });
 
         // ========== 테스트 시작 ==========
         function startTest() {
@@ -619,6 +645,11 @@
                 calculateResults();
                 return;
             }
+
+            // 마우스 추적 초기화
+            mouseTracking.distance = 0;
+            mouseTracking.lastX = null;
+            mouseTracking.lastY = null;
 
             const question = questions[index];
             userData.currentQuestion = index;
@@ -702,7 +733,8 @@
                 responseTime: responseTime,
                 toggles: userData.toggleCounts[question.id] || 0,
                 consistency: question.consistency,
-                isAfk: isAfk
+                isAfk: isAfk,
+                mouseDistance: mouseTracking.distance // 마우스 이동 거리 저장
             });
 
             userData.totalResponseTime += responseTime;
@@ -715,6 +747,7 @@
             overlay.innerHTML = `
                 RT: ${rt}ms<br>
                 Toggles: ${toggles}<br>
+                Dist: ${Math.round(mouseTracking.distance)}px<br>
                 Q: ${userData.currentQuestion + 1}/${questions.length}
             `;
         }
@@ -771,6 +804,10 @@
             const scores = { E: 0, I: 0, S: 0, N: 0, T: 0, F: 0, J: 0, P: 0 };
             const dimensions = { EI: [], SN: [], TF: [], JP: [] };
 
+            // 인지적 갈등(Cognitive Conflict) 분석 설정
+            const CONFLICT_THRESHOLD = 3000; // 픽셀 단위
+            let conflictCount = 0;
+
             userData.answers.forEach((ans, index) => {
                 if (ans.dimension === 'LIE') return;
 
@@ -789,6 +826,13 @@
                 }
 
                 const adjustedValue = ans.value * weight;
+
+                // 인지적 갈등(마우스 이동 과다) 감지 시 P(인식), F(감정) 가중치 부여
+                if (ans.mouseDistance > CONFLICT_THRESHOLD) {
+                    conflictCount++;
+                    scores.P += 0.5;
+                    scores.F += 0.5;
+                }
 
                 if (ans.direction === 'E' || ans.direction === 'I') {
                     scores[ans.direction] += adjustedValue;
@@ -877,7 +921,7 @@
             createBarChart(scores);
 
             // 인사이트 생성
-            generateInsights(mbti, avgResponseTime, totalToggles, consistencyScore, honestyScore, dimensions);
+            generateInsights(mbti, avgResponseTime, totalToggles, consistencyScore, honestyScore, dimensions, conflictCount);
         }
 
         // ========== 일관성 체크 ==========
@@ -928,7 +972,7 @@
         }
 
         // ========== 인사이트 생성 ==========
-        function generateInsights(mbti, avgRT, toggles, consistency, honesty, dimensions) {
+        function generateInsights(mbti, avgRT, toggles, consistency, honesty, dimensions, conflictCount) {
             // 행동 패턴 분석
             let behaviorText = '';
             if (avgRT < 2000) {
@@ -941,6 +985,10 @@
 
             if (toggles > 15) {
                 behaviorText += ` 총 ${toggles}회의 답변 변경이 있었으며, 이는 P(인식형) 성향의 유연한 사고방식 또는 결정에 대한 불확실성을 반영합니다.`;
+            }
+
+            if (conflictCount > 2) {
+                behaviorText += ` 또한 ${conflictCount}개 문항에서 마우스의 격한 움직임이 감지되었습니다. 이는 선택지 간의 인지적 갈등(Cognitive Conflict)을 의미하며, 이러한 고민의 흔적은 감정형(F)과 인식형(P) 성향 분석에 가중 반영되었습니다.`;
             }
 
             // 정직도 분석
