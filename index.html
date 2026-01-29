@@ -443,20 +443,18 @@
         <!-- 시작 화면 -->
         <div class="intro-screen active">
             <div class="intro-card">
-                <h2>📊 이것은 단순한 MBTI 테스트가 아닙니다</h2>
+                <h2>📊 행동 분석 기반 심층 진단</h2>
                 <p>
-                    이 프로그램은 당신의 <strong>선택</strong>뿐만 아니라, 
-                    <strong>선택하는 방식</strong>을 실시간으로 추적하여 분석합니다.
+                    이 시스템은 당신의 <strong>선택</strong>뿐만 아니라,
+                    <strong>응답 과정에서 나타나는 미세한 심리적 신호</strong>를 실시간으로 분석합니다.
                 </p>
-                <ul>
-                    <li>⏱️ <strong>반응 시간(Response Time)</strong>: 각 문항에 얼마나 고민했는가</li>
-                    <li>🔄 <strong>재선택 횟수(Toggle Count)</strong>: 답을 바꾼 횟수</li>
-                    <li>🎯 <strong>일관성 지수(Consistency)</strong>: 유사 문항 간의 답변 일치도</li>
-                    <li>🎭 <strong>정직도 척도(Lie Scale)</strong>: 사회적 바람직성 편향 탐지</li>
-                </ul>
-                <p style="margin-top: 30px; font-size: 0.95rem; color: var(--warning);">
-                    ⚠️ 본능적으로 답하세요. 과도하게 고민하거나 '좋게 보이려는' 답변은 
-                    알고리즘이 감지하여 신뢰도 점수를 낮춥니다.
+                <p style="margin: 20px 0; line-height: 1.8; color: var(--text-dim);">
+                    특정 패턴을 인위적으로 만들려고 시도하면 분석 신뢰도가 급격히 하락하여
+                    결과를 확인할 수 없을 수 있습니다.
+                </p>
+                <p style="margin-top: 30px; font-size: 1.1rem; color: var(--accent);">
+                    💡 가장 정확한 결과를 얻는 유일한 방법은
+                    <strong>'가장 먼저 떠오르는 생각'</strong>을 그대로 선택하는 것입니다.
                 </p>
                 <button class="start-btn" onclick="startTest()">테스트 시작하기</button>
             </div>
@@ -706,22 +704,68 @@
             `;
         }
 
+        // ========== 이상 패턴 감지 ==========
+        function detectAbnormalPatterns(answers) {
+            const report = {
+                isAbnormal: false,
+                reasons: []
+            };
+
+            const validAnswers = answers.filter(a => !a.isAfk);
+            if (validAnswers.length < 5) return report; // 데이터 부족
+
+            // 1. Rapid Fire Check (초고속 응답)
+            const fastAnswers = validAnswers.filter(a => a.responseTime < 800).length;
+            if (fastAnswers > validAnswers.length * 0.6) {
+                report.isAbnormal = true;
+                report.reasons.push("비현실적으로 빠른 응답 속도 (무작위 선택 의심)");
+            }
+
+            // 2. Straightlining (일직선 응답)
+            const counts = {};
+            validAnswers.forEach(a => counts[a.value] = (counts[a.value] || 0) + 1);
+            const maxCount = Math.max(...Object.values(counts));
+            if (maxCount > validAnswers.length * 0.9) {
+                report.isAbnormal = true;
+                report.reasons.push("특정 응답 반복 (불성실 응답 패턴)");
+            }
+
+            // 3. Robotic Rhythm (기계적 리듬)
+            const times = validAnswers.map(a => a.responseTime);
+            const mean = times.reduce((a, b) => a + b, 0) / times.length;
+            const variance = times.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / times.length;
+            const stdDev = Math.sqrt(variance);
+
+            if (stdDev < 150) {
+                report.isAbnormal = true;
+                report.reasons.push("인위적인 응답 리듬 감지 (매크로/패턴 조작)");
+            }
+
+            return report;
+        }
+
         // ========== 결과 계산 ==========
         function calculateResults() {
             document.querySelector('.question-screen').classList.remove('active');
             document.querySelector('.result-screen').classList.add('active');
 
+            // 이상 패턴 분석 확인
+            const patternReport = detectAbnormalPatterns(userData.answers);
+
             // MBTI 점수 계산
             const scores = { E: 0, I: 0, S: 0, N: 0, T: 0, F: 0, J: 0, P: 0 };
             const dimensions = { EI: [], SN: [], TF: [], JP: [] };
 
-            userData.answers.forEach(ans => {
+            userData.answers.forEach((ans, index) => {
                 if (ans.dimension === 'LIE') return;
 
                 // 가중치 부여: 반응 시간이 짧고 재선택이 없을수록 확신도 높음
                 let weight = 1.0;
 
-                if (ans.isAfk) {
+                // Warm-up 구간 (처음 3문항)
+                if (index < 3) {
+                    weight = 0.2; // 낮은 가중치 (연습/적응 구간)
+                } else if (ans.isAfk) {
                     // AFK인 경우 시간 가중치 제외 (기본 가중치 1.0 적용)
                 } else {
                     if (ans.responseTime < 2000) weight += 0.3; // 빠른 응답
@@ -773,7 +817,15 @@
             if (userData.afkCount > 0) confidence -= (userData.afkCount * 5); // AFK 감점
 
             // UI 업데이트
-            document.getElementById('mbtiResult').textContent = mbti;
+            if (patternReport.isAbnormal) {
+                document.getElementById('mbtiResult').textContent = "ANALYSIS FAILED";
+                document.getElementById('mbtiResult').style.fontSize = "2rem";
+                document.getElementById('mbtiResult').style.color = "var(--warning)";
+                confidence = 0;
+            } else {
+                document.getElementById('mbtiResult').textContent = mbti;
+            }
+
             document.getElementById('confidenceScore').textContent = `${Math.round(confidence)}%`;
             document.getElementById('avgResponseTime').textContent = `${(avgResponseTime / 1000).toFixed(1)}s`;
             document.getElementById('totalToggles').textContent = totalToggles;
@@ -784,21 +836,27 @@
             const validCount = totalQuestions - userData.afkCount;
             const validRate = Math.round((validCount / totalQuestions) * 100);
 
-            document.getElementById('validResponseRate').textContent =
-                `${validRate}% (총 ${totalQuestions}문항 중 ${userData.afkCount}문항에서 비정상적 응답 흐름 감지)`;
-
-            document.getElementById('afkAnalysis').innerHTML =
-                `귀하는 검사 중 <strong>${userData.afkCount}회의 집중력 저하(AFK)</strong> 구간이 포착되었습니다. 이는 결과의 일관성에 영향을 줄 수 있는 요소입니다.`;
-
-            let qComment = "";
-            if (userData.afkCount === 0) {
-                qComment = "모든 문항에서 집중력을 유지하여 응답 흐름이 매우 원활합니다. 결과의 신뢰도가 높습니다.";
-            } else if (userData.afkCount <= 3) {
-                qComment = "일부 문항에서 응답 흐름이 끊겼으나, 전반적인 패턴이 일관되어 결과값은 유효한 것으로 판단됩니다.";
+            if (patternReport.isAbnormal) {
+                 document.getElementById('validResponseRate').textContent = "데이터 신뢰도 치명적 결함 발견";
+                 document.getElementById('afkAnalysis').innerHTML = `<strong style="color: var(--warning)">비정상 패턴 감지:</strong> ${patternReport.reasons.join(", ")}`;
+                 document.getElementById('qualityComment').textContent = "\"인위적인 조작 패턴이 감지되어 분석 결과를 산출할 수 없습니다.\"";
             } else {
-                qComment = "잦은 집중력 저하로 인해 일부 결과의 정확도가 떨어질 수 있습니다. 재검사를 권장할 수 있는 수준입니다.";
+                document.getElementById('validResponseRate').textContent =
+                    `${validRate}% (총 ${totalQuestions}문항 중 ${userData.afkCount}문항에서 비정상적 응답 흐름 감지)`;
+
+                document.getElementById('afkAnalysis').innerHTML =
+                    `귀하는 검사 중 <strong>${userData.afkCount}회의 집중력 저하(AFK)</strong> 구간이 포착되었습니다. 이는 결과의 일관성에 영향을 줄 수 있는 요소입니다.`;
+
+                let qComment = "";
+                if (userData.afkCount === 0) {
+                    qComment = "모든 문항에서 집중력을 유지하여 응답 흐름이 매우 원활합니다. 결과의 신뢰도가 높습니다.";
+                } else if (userData.afkCount <= 3) {
+                    qComment = "일부 문항에서 응답 흐름이 끊겼으나, 전반적인 패턴이 일관되어 결과값은 유효한 것으로 판단됩니다.";
+                } else {
+                    qComment = "잦은 집중력 저하로 인해 일부 결과의 정확도가 떨어질 수 있습니다. 재검사를 권장할 수 있는 수준입니다.";
+                }
+                document.getElementById('qualityComment').textContent = `"${qComment}"`;
             }
-            document.getElementById('qualityComment').textContent = `"${qComment}"`;
 
             // 바 차트 생성
             createBarChart(scores);
